@@ -26,7 +26,18 @@ No Windows DLL is needed, for reading or for writing. **Linux only**: Windows is
 - Keyboard shortcuts: `Ctrl+S` save · `Ctrl+N` add · `Ctrl+F` search · `Ctrl+Z` revert all · `+`/`-` quantity ·
   `Del` delete.
 
-Tested with game version **2.03.02**. Another version may change the format.
+## Development environment
+
+The project was developed and tested on:
+
+| Component | Version |
+|---|---|
+| Arch Linux | rolling, October 2026 (kernel `7.2.8-arch1-2`) |
+| Proton | Proton Hotfix `11.0-100` (`hotfix-20261007`) |
+| Crimson Desert | `2.03.02` (Steam build `25474236`) |
+| Python | `3.14.7`, Tk `8.6.16` |
+
+CI also checks Python 3.10 and 3.13. Another game version may change the save format.
 
 ## Screenshots
 
