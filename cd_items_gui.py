@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MPL-2.0
 """Graphical interface: inventory (quantities, adding, deleting) and Kliff's skill points.
 
 Changes are kept in memory and written all at once with "Save"
@@ -12,6 +13,7 @@ from __future__ import annotations
 import json
 import struct
 import subprocess
+import sys
 import time
 import tkinter as tk
 from pathlib import Path
@@ -27,9 +29,11 @@ try:
 except ImportError:  # the interface stays usable with the default Tk theme
     sv_ttk = None
 
-MAX_U64 = 2**63 - 1
+MAX_STACK = cd_items.MAX_STACK
+MAX_UNSAVED_COPIES = 10   # copies of one non-stackable item added before saving (mass additions broke saves)
 MAX_SKILL_POINTS = 999      # cap offered in the interface (the format accepts up to 65535)
 ABYSS_ARTIFACT = 75001      # "Abyss Artifact": the regular skill currency
+TEXT_CLASSES = ("Entry", "TEntry", "TSpinbox", "Spinbox", "TCombobox", "Text")
 INFINITE = 10**15  # beyond this, the max stack is considered unlimited
 PREFS = Path.home() / ".config" / "crimson_save_editor.json"
 
@@ -56,7 +60,10 @@ def init_scale(root: tk.Misc):
 
 
 def game_running() -> bool:
-    return subprocess.run(["pgrep", "-f", "CrimsonDesert.exe"], capture_output=True).returncode == 0
+    try:
+        return subprocess.run(["pgrep", "-f", "CrimsonDesert.exe"], capture_output=True).returncode == 0
+    except OSError:  # pgrep not installed: no warning rather than no editor
+        return False
 
 
 def inventory_label(key) -> str:
@@ -148,7 +155,7 @@ class App(tk.Tk):
         self.minsize(min(px(960), w), min(px(520), h))
 
         self.db = cd_inventory.load_items_db()
-        self.names = cd_items.load_names()
+        self.names = self.db              # single source for names and max stacks
         self.path: Path | None = None
         self.header = b""
         self.blob = bytearray()           # working blob (includes additions / deletions)
@@ -412,7 +419,7 @@ class App(tk.Tk):
         art.pack(fill="x", pady=(px(12), 0))
         self.sk_art = ttk.Label(art, text="", justify="left", wraplength=px(340))
         self.sk_art.pack(anchor="w")
-        ttk.Button(art, text="Fill a stack (10)", command=self._fill_artifacts).pack(anchor="w", pady=(px(8), 0))
+        ttk.Button(art, text=f"Fill a stack ({self._artifact_stack()})", command=self._fill_artifacts).pack(anchor="w", pady=(px(8), 0))
         ttk.Label(art, text="Absorb them in-game: 1 artifact = 1 skill point.",
                   style="Muted.TLabel", wraplength=px(340), justify="left").pack(anchor="w", pady=(px(6), 0))
 
@@ -468,14 +475,14 @@ class App(tk.Tk):
     def _set_points(self, n: int):
         if self.skills is None:
             return
-        n = max(0, min(n, MAX_SKILL_POINTS))
+        n = max(0, min(n, max(MAX_SKILL_POINTS, self.skills.current)))
         if n == self.skills.current:
             self._refresh_skills()
             return
         try:
             new_blob = cd_skills.set_skill_points(self._blob_with_pending(), n)
-        except (ValueError, cd_inventory.DecodeError) as e:
-            messagebox.showerror("Skill points", str(e))
+        except Exception as e:
+            messagebox.showerror("Skill points", str(e) or type(e).__name__)
             return
         self._set_blob(new_blob)
 
@@ -489,12 +496,16 @@ class App(tk.Tk):
         except ValueError:
             self._refresh_skills()
 
+    def _artifact_stack(self) -> int:
+        return self.db.get(ABYSS_ARTIFACT, {}).get("maxStack") or 10
+
     def _fill_artifacts(self):
         stack = next((it for it in self.items.values() if it["key"] == ABYSS_ARTIFACT
                       and self.inv_of.get(it["header"]) == cd_inventory.BAG), None)
-        m = self.db.get(ABYSS_ARTIFACT, {}).get("maxStack") or 10
+        m = self._artifact_stack()
         if stack is not None:
-            self._apply(stack, m)
+            if self._qty(stack["id"]) < m:  # never lower a bigger stack
+                self._apply(stack, m)
             self._after_edit()
             self._refresh_skills()
             return
@@ -505,7 +516,8 @@ class App(tk.Tk):
     def _bind_shortcuts(self):
         self.bind_all("<Control-s>", lambda e: self._save())
         self.bind_all("<Control-n>", lambda e: self._open_add())
-        self.bind_all("<Control-z>", lambda e: self._revert())
+        # Ctrl+Z inside a text field is left alone (it used to trigger "Revert all" while typing)
+        self.bind_all("<Control-z>", lambda e: None if e.widget.winfo_class() in TEXT_CLASSES else self._revert())
         self.bind("<Control-f>", lambda e: (self.search_entry.focus_set(), "break")[1])
         self.bind("<Escape>", lambda e: self.tree.focus_set())
 
@@ -534,47 +546,58 @@ class App(tk.Tk):
     def _load(self, ask=True):
         if ask and self.dirty() and not messagebox.askyesno("Unsaved changes",
                                                             "Discard current changes?"):
+            self._show_current_slot()
             return
         path = self.slot_paths.get(self.slot_var.get())
         if not path:
             return
         try:
             header, blob = cd_items.load_save(path)
-        except (cd_items.SaveError, OSError) as e:
-            messagebox.showerror("Read error", str(e))
+            decoded = self._decode(blob)
+        except Exception as e:  # unreadable save: keep the current one, never mix two slots
+            messagebox.showerror("Read error", f"{path.parent.name}: {e or type(e).__name__}")
+            self._show_current_slot()
             return
         self.path, self.header = path, header
         self.added.clear()
         self.removed.clear()
-        self.orig = {i["itemNo"]: i["stack"] for i in cd_items.find_items(blob)
-                     if i["container"] == "InventorySaveData"}
-        try:
-            self.skills_orig = cd_skills.read_skills(blob, self.knames)
-        except (cd_inventory.DecodeError, StopIteration, KeyError, ValueError):
-            self.skills_orig = None
-        self._set_blob(blob)
+        self.orig = {i["itemNo"]: i["stack"] for i in decoded[0] if i["container"] == "InventorySaveData"}
+        self.skills_orig = decoded[2]
+        self._set_blob(blob, decoded)
 
-    def _set_blob(self, blob: bytearray):
+    def _show_current_slot(self):
+        """Puts the slot selector back on the save actually loaded."""
+        label = next((k for k, v in self.slot_paths.items() if v == self.path), "")
+        self.slot_var.set(label)
+
+    def _decode(self, blob: bytearray):
+        """Decodes what the window shows; raises if the items themselves cannot be read."""
+        items = cd_items.find_items(blob)
+        try:
+            invs = cd_inventory.read_inventories(cd_inventory.Decoder(blob))
+        except Exception:
+            invs = {}  # adding / deleting disabled, editing still possible
+        try:
+            skills = cd_skills.read_skills(blob, self.knames)
+        except Exception:
+            skills = None
+        return items, invs, skills
+
+    def _set_blob(self, blob: bytearray, decoded=None):
         """Installs a new working blob and recomputes the item list."""
+        if decoded is None:
+            try:
+                decoded = self._decode(blob)
+            except Exception as e:  # keep the previous working blob
+                messagebox.showerror("Read error", str(e) or type(e).__name__)
+                return
+        items, self.invs, self.skills = decoded
         self.blob = blob
         self.pending.clear()
-        try:
-            items = cd_items.find_items(blob)
-        except (cd_items.SaveError, OSError) as e:
-            messagebox.showerror("Read error", str(e))
-            return
         self.items = {i["id"]: i for i in items if i["container"] == "InventorySaveData"}
-        try:
-            self.invs = cd_inventory.read_inventories(cd_inventory.Decoder(blob))
-            self.inv_of = {el.start: k for k, inv in self.invs.items() for el in inv.items}
-        except cd_inventory.DecodeError:
-            self.invs, self.inv_of = {}, {}  # adding / deleting disabled, editing still possible
+        self.inv_of = {el.start: k for k, inv in self.invs.items() for el in inv.items}
         if self.inv_filter.get() != "all" and int(self.inv_filter.get()) not in self.invs:
             self.inv_filter.set("all")
-        try:
-            self.skills = cd_skills.read_skills(blob, self.knames)
-        except (cd_inventory.DecodeError, StopIteration, KeyError, ValueError):
-            self.skills = None
         self._build_sidebar()
         self._fill()
         self._on_select()
@@ -584,10 +607,10 @@ class App(tk.Tk):
 
     def _max_for(self, it) -> int:
         if self.force_var.get():
-            return MAX_U64
+            return MAX_STACK
         m = self.names.get(it["key"], {}).get("maxStack")
         # the table is not always accurate: never cap below the current quantity
-        return max(min(m, MAX_U64), it["stack"]) if m else MAX_U64
+        return max(min(m, MAX_STACK), it["stack"]) if m else MAX_STACK
 
     def _qty(self, iid: int) -> int:
         return self.pending.get(iid, self.items[iid]["stack"])
@@ -629,7 +652,12 @@ class App(tk.Tk):
         cols = ("name", "cat", "inv", "slot", "qty", "max")
         idx = cols.index(self.sort_col)
         def sort_key(r):
-            v = self._qty(r[1]["id"]) if self.sort_col == "qty" else r[0][idx]
+            if self.sort_col == "qty":
+                v = self._qty(r[1]["id"])
+            elif self.sort_col == "max":  # raw value, not the formatted "100 000"
+                v = self.names.get(r[1]["key"], {}).get("maxStack") or 0
+            else:
+                v = r[0][idx]
             return (0, v) if isinstance(v, int) else (1, str(v).lower())
         for i, (row, it) in enumerate(sorted(rows, key=sort_key, reverse=self.sort_rev)):
             self.tree.insert("", "end", iid=str(it["id"]), values=row, tags=self._tags(it, i))
@@ -751,10 +779,16 @@ class App(tk.Tk):
 
     def add_item(self, item_key: int, count: int) -> str | None:
         """Adds the item to the working blob; returns an error message or None."""
+        if (self.db.get(item_key, {}).get("maxStack") or 1) == 1:
+            unsaved = sum(1 for it in self.items.values()
+                          if it["key"] == item_key and it["itemNo"] in self.added)
+            if unsaved >= MAX_UNSAVED_COPIES:
+                return (f"Already {unsaved} unsaved copies of this item. Save, then load the game and let it "
+                        "save once before adding more (mass additions have broken saves).")
         try:
             new_blob, info = cd_inventory.add_item(self._blob_with_pending(), item_key, count)
-        except (ValueError, cd_inventory.DecodeError) as e:
-            return str(e)
+        except Exception as e:
+            return str(e) or type(e).__name__
         self.added.add(info["itemNo"])
         self._set_blob(new_blob)
         new = next((it for it in self.items.values() if it["itemNo"] == info["itemNo"]), None)
@@ -795,7 +829,7 @@ class App(tk.Tk):
                              if "_itemNo" in el.fields
                              and struct.unpack_from("<Q", blob, el.fields["_itemNo"][0])[0] == it["itemNo"])
                 blob, _ = cd_inventory.remove_item(blob, start)
-            except (ValueError, StopIteration, cd_inventory.DecodeError) as e:
+            except Exception as e:
                 name = self.names.get(it["key"], {}).get("name", str(it["key"]))
                 messagebox.showerror("Cannot delete", f"{name}: {e or 'not found'}")
                 break
@@ -993,7 +1027,7 @@ class AddDialog(tk.Toplevel):
                 continue
             if self.hide_present.get() and key in have:
                 continue
-            if cd_inventory.blocked(v):
+            if cd_inventory.blocked(v) or self._dest(key) is None:
                 continue
             rows.append((name.lower(), key, v))
         rows.sort()
@@ -1080,5 +1114,21 @@ def _mtime(p: Path) -> str:
     return time.strftime("%d/%m %H:%M", time.localtime(p.stat().st_mtime))
 
 
+def refuse_windows():
+    """Linux only: say so in a window (a double-click shows no console) and stop."""
+    if not cd_items.is_windows():
+        return
+    print(cd_items.WINDOWS_MESSAGE, file=sys.stderr)
+    try:
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showerror("Crimson Desert – Save Editor", cd_items.WINDOWS_MESSAGE)
+        root.destroy()
+    except tk.TclError:
+        pass
+    sys.exit(1)
+
+
 if __name__ == "__main__":
+    refuse_windows()
     App().mainloop()

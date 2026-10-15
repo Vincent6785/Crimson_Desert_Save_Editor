@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MPL-2.0
 """Inventory structure and item insertion in a Crimson Desert save.
 
 "Clone + swap" method from NattKh/CRIMSON-DESERT-SAVE-EDITOR-AND-GAME-MODS
@@ -30,6 +31,9 @@ BAG_BASE, BAG_MAX = 50, 240
 # Camp resources / contributions: one slot per possible item type.
 RESOURCES = 1
 INVENTORY_NAMES = {RESOURCES: "Camp resources", BAG: "Character bag"}
+# items_db "inventory" value -> sub-inventory they are added to. Inventory 5 items already live
+# in the bag in real saves; items of any other inventory are not offered.
+ADD_TARGETS = {RESOURCES: RESOURCES, BAG: BAG, 5: BAG}
 
 
 # Items whose insertion broke a save: never offered nor inserted.
@@ -40,9 +44,11 @@ def blocked(info: dict) -> bool:
     return any(n in (info.get("name") or "") for n in BLOCKED_NAMES)
 
 
-def destination(item_key: int, db: dict) -> int:
-    """Only two sub-inventories have a known capacity: items are only added there."""
-    return RESOURCES if db.get(item_key, {}).get("inventory") == RESOURCES else BAG
+def destination(item_key: int, db: dict) -> int | None:
+    """Sub-inventory the item is added to, or None if it cannot be added safely.
+
+    Only two sub-inventories have a known capacity: items are only added there."""
+    return ADD_TARGETS.get(db.get(item_key, {}).get("inventory", BAG))
 
 
 class DecodeError(Exception):
@@ -177,7 +183,9 @@ class SubInventory:
 def read_inventories(dec: Decoder) -> dict[int, SubInventory]:
     b = dec.b
     toc = dec.toc()
-    boff, bsz = next((o, s) for n, o, s in toc if n == "InventorySaveData")
+    boff, bsz = next(((o, s) for n, o, s in toc if n == "InventorySaveData"), (None, None))
+    if boff is None:
+        raise DecodeError("InventorySaveData block missing")
     end = boff + bsz
     mbc = _u16(b, boff)
     mask = b[boff + 2:boff + 2 + mbc]
@@ -296,6 +304,8 @@ def add_item(blob: bytearray, item_key: int, count: int, inventory_key: int | No
     info = db.get(item_key, {})
     if inventory_key is None:
         inventory_key = destination(item_key, db)
+        if inventory_key is None:
+            raise ValueError(f"\"{info.get('name', item_key)}\" belongs to an inventory this editor cannot add to.")
     if blocked(info):
         raise ValueError(f"\"{info.get('name')}\" cannot be added (it has already broken a save).")
     max_stack = info.get("maxStack") or 1
@@ -311,7 +321,8 @@ def add_item(blob: bytearray, item_key: int, count: int, inventory_key: int | No
         raise ValueError(f"Sub-inventory {inventory_key} is empty: no item to clone.")
 
     # stackable item already present: its quantity must be changed instead of adding a second one
-    present = [el for el in inv.items if _u32(blob, el.fields["_itemKey"][0]) == item_key]
+    present = [el for el in inv.items
+               if "_itemKey" in el.fields and _u32(blob, el.fields["_itemKey"][0]) == item_key]
     if present and max_stack > 1:
         raise ValueError("Item already present: change its quantity instead.")
 

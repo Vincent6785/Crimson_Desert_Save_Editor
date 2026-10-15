@@ -1,21 +1,27 @@
 # Crimson Desert – Save Editor (Linux)
 
 A **native Linux** save editor for Crimson Desert (Steam / Proton), written in Python with a Tkinter GUI.
-No Windows DLL is needed, for reading or for writing.
+No Windows DLL is needed, for reading or for writing. **Linux only**: Windows is deliberately refused.
 
 ![Inventory tab (dark theme)](docs/screenshots/main_dark.png)
 
 ## Features
 
 - **Inventory**: change the quantity of any item (currency, camp resources, consumables…).
-- **Add an item** that is not in the inventory, picked from a list of more than 6,000 items. The editor checks that
-  there is free space and puts the item in the right inventory (character bag or camp resources).
-- **Delete an item** from the inventory.
-- **Kliff's skill points**: set the number of available points. You then spend them in the game's Skills menu, which
-  still enforces prerequisites and costs.
+- **Add an item** that is not in the inventory, picked from a list of about 5,800 items. The editor checks that
+  there is free space, and adds the item to the camp resources if it belongs there, otherwise to the character bag.
+  Items that belong to other inventories are not offered.
+- **Delete an item** from the inventory (except the last item of a sub-inventory, which the save format does not
+  allow to empty).
+- **Kliff's skill points**: set the number of available points (up to 999 in the interface). You then spend them in
+  the game's Skills menu, which still enforces prerequisites and costs.
 - Fill up a stack of **Abyss Artifact**.
 - Light and dark themes, HiDPI-aware interface.
-- **Automatic backup** of the save before every write, in `~/crimson_save_backups/<date>/<slot>/`.
+- **Automatic backup** of the save before every write, in
+  `~/crimson_save_backups/<date_time>/<steam id>/<slot>/save.save`.
+- Warning banner while the game is running.
+- Keyboard shortcuts: `Ctrl+S` save · `Ctrl+N` add · `Ctrl+F` search · `Ctrl+Z` revert all · `+`/`-` quantity ·
+  `Del` delete.
 
 Tested with game version **2.03.02**. Another version may change the format.
 
@@ -31,7 +37,8 @@ Light theme, with pending changes highlighted before saving:
 
 ## Installation
 
-Requirements: Python 3.10 or newer, with Tkinter (`tk` on Arch, `python3-tk` on Debian/Ubuntu).
+Requirements: Python 3.10 or newer, with Tkinter (`tk` on Arch, `python3-tk` on Debian/Ubuntu,
+`python3-tkinter` on Fedora).
 
 ```bash
 git clone https://github.com/Vincent6785/Crimson_Desert_Save_Editor.git
@@ -63,8 +70,10 @@ A command-line interface is also available:
 - **Disable Steam Cloud** for the game, or pick the **local** version if Steam reports a conflict.
 - Try it on a secondary slot first. After an edit, load the game and let it save once before editing again.
 - **Avoid mass additions.** Adding dozens of copies of a non-stackable item, or absurd quantities, has already made
-  saves impossible to load. "Sealed Abyss Artifact" items are blocked for this reason.
-- To restore a save, copy `~/crimson_save_backups/<date>/<slot>/save.save` back in place.
+  saves impossible to load. The editor refuses more than 10 unsaved copies of the same non-stackable item, and
+  "Sealed Abyss Artifact" items are blocked.
+- To restore a save, copy `~/crimson_save_backups/<date_time>/<steam id>/<slot>/save.save` back to
+  `…/Pearl Abyss/CD/save/<steam id>/<slot>/save.save` (game closed).
 
 **Single-player** only. Unofficial tool, not affiliated with Pearl Abyss. Use at your own risk.
 
@@ -76,13 +85,14 @@ A command-line interface is also available:
 | `cd_inventory.py` | Structure decoding, adding and removing items (with offset and block-table updates) |
 | `cd_skills.py` | Reading and changing skill points |
 | `cd_items_gui.py` | Graphical interface |
-| `items_db.json`, `item_names.json`, `knowledge_names.json` | Item and knowledge names and properties |
+| `items_db.json` | Item names, categories, max stacks and native inventories |
+| `knowledge_names.json` | Skill / knowledge names |
 
 ## Credits and license
 
 The save format (encryption, schema, structure) and the item and knowledge name files come from the work of
 **NattKh**:
 [CRIMSON-DESERT-SAVE-EDITOR-AND-GAME-MODS](https://github.com/NattKh/CRIMSON-DESERT-SAVE-EDITOR-AND-GAME-MODS)
-(MPL-2.0). The code in this repository is an independent pure-Python reimplementation.
+(MPL-2.0). The code in this repository is a pure-Python reimplementation based on their work.
 
 This project is distributed under the **Mozilla Public License 2.0** (see `LICENSE`).

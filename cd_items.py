@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MPL-2.0
 """List / change item quantities in a Crimson Desert save.
 
 Format taken from NattKh/CRIMSON-DESERT-SAVE-EDITOR-AND-GAME-MODS (save_crypto.py, save_parser.py):
@@ -33,15 +34,28 @@ _PREFIXES = {1: b'^Qgbrm/.#@`zsr]\\@rvfal#"', 2: b"^Pearl--#Abyss__@!!"}
 
 HEADER_SIZE = 0x80
 UNCOMP_SIZE_OFF = 0x12
-PAYLOAD_SIZE_OFF = 0x16
 NONCE_OFF = 0x1A
 HMAC_OFF = 0x2A
 
-ITEM_NAMES = Path(__file__).with_name("item_names.json")
+ITEMS_DB = Path(__file__).with_name("items_db.json")
 BACKUP_ROOT = Path.home() / "crimson_save_backups"
 APP_ID = "3321460"
 SAVE_SUBDIR = Path("pfx/drive_c/users/steamuser/AppData/Local/Pearl Abyss/CD/save")
 STEAM_ROOTS = (".local/share/Steam", ".steam/steam", ".var/app/com.valvesoftware.Steam/.local/share/Steam")
+
+
+MAX_STACK = 2**63 - 1    # _stackCount is a u64, kept within the signed range the game uses
+WINDOWS_MESSAGE = "Why are you using this shitty OS? I'm not built to handle hopeless situations."
+
+
+def is_windows() -> bool:
+    return sys.platform in ("win32", "cygwin") or os.name == "nt"
+
+
+def refuse_windows() -> None:
+    """This tool is Linux only: stop right away on Windows."""
+    if is_windows():
+        sys.exit(WINDOWS_MESSAGE)
 
 
 class SaveError(Exception):
@@ -203,9 +217,10 @@ def find_items(blob):
     return items
 
 
-def load_names():
+def load_names() -> dict[int, dict]:
+    """itemKey -> {name, category, maxStack, inventory}."""
     try:
-        return {i["itemKey"]: i for i in json.loads(ITEM_NAMES.read_text())["items"]}
+        return {int(k): v for k, v in json.loads(ITEMS_DB.read_text()).items()}
     except OSError:
         return {}
 
@@ -267,8 +282,8 @@ def cmd_set(args):
     it = matches[0]
     info = names.get(it["key"], {})
     max_stack = info.get("maxStack")
-    if args.count < 1:
-        sys.exit("The quantity must be >= 1.")
+    if not 1 <= args.count <= MAX_STACK:
+        sys.exit(f"The quantity must be between 1 and {MAX_STACK}.")
     if max_stack and args.count > max_stack and not args.force:
         sys.exit(f"{args.count} exceeds the max stack ({max_stack}) of \"{info.get('name')}\". Use --force to override.")
 
@@ -281,21 +296,34 @@ def cmd_set(args):
 def write_save(path: Path, header: bytes, blob: bytes) -> Path:
     """Encrypt and write blob to path after verification; return the path of the original's backup copy."""
     tmp = path.with_suffix(".save.tmp")
-    tmp.write_bytes(build_save(header, blob))
-    # verification: read back what we just produced
-    _, check = load_save(tmp)
-    if check != blob:
-        tmp.unlink()
-        raise SaveError("Verification failed, original file left untouched.")
-
-    backup = BACKUP_ROOT / time.strftime("%Y-%m-%d_%H-%M-%S") / path.parent.name / path.name
-    backup.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(path, backup)
-    os.replace(tmp, path)
+    try:
+        tmp.write_bytes(build_save(header, blob))
+        # verification: read back what we just produced
+        _, check = load_save(tmp)
+        if check != blob:
+            raise SaveError("Verification failed, original file left untouched.")
+        backup = _backup_path(path)
+        backup.parent.mkdir(parents=True)
+        shutil.copy2(path, backup)
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
     return backup
 
 
+def _backup_path(path: Path) -> Path:
+    """<BACKUP_ROOT>/<date_time>[-N]/<steam id>/<slot>/save.save, never reusing an existing folder."""
+    stamp = time.strftime("%Y-%m-%d_%H-%M-%S")
+    folder, n = BACKUP_ROOT / stamp, 1
+    while folder.exists():
+        n += 1
+        folder = BACKUP_ROOT / f"{stamp}-{n}"
+    return folder / path.parent.parent.name / path.parent.name / path.name
+
+
 def main():
+    refuse_windows()
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("list", help="list items")
@@ -316,6 +344,8 @@ def main():
         args.func(args)
     except SaveError as e:
         sys.exit(str(e))
+    except Exception as e:  # unusual save: report it without a traceback
+        sys.exit(f"Error: {type(e).__name__}: {e}")
 
 
 if __name__ == "__main__":

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MPL-2.0
 """Kliff's skill points in a Crimson Desert save.
 
 Skills are "knowledge" entries (KnowledgeSaveData block):
