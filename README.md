@@ -1,5 +1,8 @@
 # Crimson Desert – Save Editor (Linux)
 
+[![CI](https://github.com/Vincent6785/Crimson_Desert_Save_Editor/actions/workflows/ci.yml/badge.svg)](https://github.com/Vincent6785/Crimson_Desert_Save_Editor/actions/workflows/ci.yml)
+[![License: MPL-2.0](https://img.shields.io/badge/license-MPL--2.0-blue.svg)](LICENSE)
+
 A **native Linux** save editor for Crimson Desert (Steam / Proton), written in Python with a Tkinter GUI.
 No Windows DLL is needed, for reading or for writing. **Linux only**: Windows is deliberately refused.
 
@@ -51,7 +54,8 @@ python3 -m venv .venv
 Saves are looked up in the game's Proton prefix, in every declared Steam library (`libraryfolders.vdf`), for both
 native and Flatpak Steam:
 `<library>/steamapps/compatdata/3321460/pfx/drive_c/users/steamuser/AppData/Local/Pearl Abyss/CD/save/`.
-If yours are elsewhere, point the `CD_SAVE_DIR` variable at the `save` folder:
+If yours are elsewhere, point the `CD_SAVE_DIR` variable at the `save` folder (a Steam id folder or a single slot
+folder also works):
 
 ```bash
 CD_SAVE_DIR=/path/to/CD/save ./run.sh
@@ -85,6 +89,8 @@ A command-line interface is also available:
 | `cd_inventory.py` | Structure decoding, adding and removing items (with offset and block-table updates) |
 | `cd_skills.py` | Reading and changing skill points |
 | `cd_items_gui.py` | Graphical interface |
+| `linux_only.py` | Stops the tool on Windows, before any dependency is loaded |
+| `tests/` | Checks that need no real save (`python -m unittest discover -s tests`) |
 | `items_db.json` | Item names, categories, max stacks and native inventories |
 | `knowledge_names.json` | Skill / knowledge names |
 

@@ -1,0 +1,42 @@
+name: Bug report
+description: Something does not work, or a save no longer loads after an edit
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before anything else: restore your save from `~/crimson_save_backups/<date_time>/<steam id>/<slot>/save.save`
+        (game closed). **Never attach a save file publicly** if you do not want to share it.
+  - type: input
+    id: game_version
+    attributes:
+      label: Game version
+      description: Shown on the title screen (e.g. 2.03.02).
+    validations:
+      required: true
+  - type: input
+    id: editor_version
+    attributes:
+      label: Editor version
+      description: Release tag or commit (`git rev-parse --short HEAD`).
+    validations:
+      required: true
+  - type: input
+    id: distro
+    attributes:
+      label: Distribution and Steam install
+      description: e.g. Arch, Steam native / Flatpak, Proton version.
+  - type: textarea
+    id: steps
+    attributes:
+      label: What did you do?
+      description: Which slot, which items or skill points, which quantities. Did you let the game save between two edits?
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: What happened?
+      description: Error message, traceback from the terminal, or what the game does when loading the save.
+    validations:
+      required: true

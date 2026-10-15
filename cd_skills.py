@@ -116,6 +116,8 @@ def set_skill_points(blob: bytes, available: int) -> bytearray:
             raise ci.DecodeError("Mask too short to enable _currentSkillPoint.")
         if "_skillPointOwnerType" not in el.fields:
             raise ci.DecodeError("_skillPointOwnerType missing: insertion position unknown.")
+        if idx != _field_index(dec, "SkillPointSaveData", "_skillPointOwnerType") + 1:
+            raise ci.DecodeError("Unexpected SkillPointSaveData field order: insertion refused.")
         out[el.start + 2 + idx // 8] |= 1 << (idx % 8)
         off, size = el.fields["_skillPointOwnerType"]
         out = ci._splice(out, dec, off + size, insert=struct.pack("<H", available), trailing=(el.end - 4,))

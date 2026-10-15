@@ -10,10 +10,13 @@ Shortcuts: Ctrl+S save · Ctrl+N add · Ctrl+F search · Ctrl+Z revert all
 """
 from __future__ import annotations
 
+import linux_only
+
+linux_only.refuse_windows(gui=True)  # before the save modules and their dependencies
+
 import json
 import struct
 import subprocess
-import sys
 import time
 import tkinter as tk
 from pathlib import Path
@@ -184,9 +187,12 @@ class App(tk.Tk):
         style = ttk.Style(self)
         base = tkfont.nametofont("TkDefaultFont")
         size = base.cget("size") or 10
-        self.font_title = tkfont.Font(family=base.cget("family"), size=size + 5, weight="bold")
-        self.font_big = tkfont.Font(family=base.cget("family"), size=size + 3, weight="bold")
-        self.font_small = tkfont.Font(family=base.cget("family"), size=max(size - 1, 8))
+        if not hasattr(self, "font_title"):  # created once: widgets keep following later changes
+            self.font_title, self.font_big, self.font_small = tkfont.Font(), tkfont.Font(), tkfont.Font()
+        family = base.cget("family")
+        self.font_title.configure(family=family, size=size + 5, weight="bold")
+        self.font_big.configure(family=family, size=size + 3, weight="bold")
+        self.font_small.configure(family=family, size=max(size - 1, 8))
         style.configure("Treeview", rowheight=base.metrics("linespace") + px(8))
         style.configure("Side.TRadiobutton", padding=(px(4), px(3)))
         style.map("Treeview", background=[("selected", self.c("sel"))], foreground=[("selected", self.c("sel_fg"))])
@@ -405,12 +411,15 @@ class App(tk.Tk):
         e = ttk.Entry(row, textvariable=self.sk_var, justify="center", font=self.font_big, width=8)
         e.pack(side="left", fill="x", expand=True)
         e.bind("<Return>", lambda ev: self._skill_define())
-        ttk.Button(row, text="Set", style="Accent.TButton", command=self._skill_define).pack(side="left", padx=(6, 0))
+        set_btn = ttk.Button(row, text="Set", style="Accent.TButton", command=self._skill_define)
+        set_btn.pack(side="left", padx=(6, 0))
+        self.sk_controls = [e, set_btn]   # disabled when the save cannot be edited safely
         grid = ttk.Frame(card)
         grid.pack(fill="x", pady=(px(6), 0))
         for i, dlt in enumerate((-10, -1, 1, 5, 10, 50)):
-            ttk.Button(grid, text=f"{dlt:+d}", command=lambda dlt=dlt: self._skill_delta(dlt)).grid(
-                row=0, column=i, sticky="ew", padx=1)
+            b = ttk.Button(grid, text=f"{dlt:+d}", command=lambda dlt=dlt: self._skill_delta(dlt))
+            b.grid(row=0, column=i, sticky="ew", padx=1)
+            self.sk_controls.append(b)
             grid.columnconfigure(i, weight=1)
         self.sk_warn = ttk.Label(card, text="", style="Danger.TLabel", wraplength=px(340), justify="left")
         self.sk_warn.pack(anchor="w", pady=(px(6), 0))
@@ -450,6 +459,9 @@ class App(tk.Tk):
     def _refresh_skills(self):
         st = self.skills
         self.sk_tree.delete(*self.sk_tree.get_children())
+        editable = st is not None and st.consistent
+        for w in self.sk_controls:
+            w.state(["!disabled"] if editable else ["disabled"])
         if st is None:
             self.sk_points["text"] = "–"
             self.sk_meta["text"] = ""
@@ -526,7 +538,15 @@ class App(tk.Tk):
     def _refresh_slots(self):
         saves = sorted(cd_items.find_saves(),
                        key=lambda p: p.stat().st_mtime, reverse=True)
-        self.slot_paths = {f"{p.parent.name}  ·  {_mtime(p)}": p for p in saves}
+        several_ids = len({p.parent.parent for p in saves}) > 1
+        self.slot_paths = {}
+        for p in saves:
+            label = f"{p.parent.parent.name} / {p.parent.name}" if several_ids else p.parent.name
+            label, n = f"{label}  ·  {_mtime(p)}", 1
+            while label in self.slot_paths:   # never let two saves share a label
+                n += 1
+                label = f"{label.split(' (')[0]} ({n})"
+            self.slot_paths[label] = p
         self.slot_box["values"] = list(self.slot_paths)
         if saves:
             self.slot_box.current(0)
@@ -1055,7 +1075,8 @@ class AddDialog(tk.Toplevel):
             self.add_btn["state"] = "disabled"
             self.sel_title["text"] = "Select an item"
             used, cap = self.app.space(cd_inventory.BAG)
-            self.info["text"] = f"{inventory_label(cd_inventory.BAG)}: {used}/{cap} slots used."
+            self.info["text"] = (f"{inventory_label(cd_inventory.BAG)}: {used}/{cap} slots used." if cap
+                                 else f"{inventory_label(cd_inventory.BAG)}: unknown capacity.")
             self.info.configure(style="Muted.TLabel")
             self.space_bar.configure(maximum=cap or 1, value=used)
             return
@@ -1114,21 +1135,5 @@ def _mtime(p: Path) -> str:
     return time.strftime("%d/%m %H:%M", time.localtime(p.stat().st_mtime))
 
 
-def refuse_windows():
-    """Linux only: say so in a window (a double-click shows no console) and stop."""
-    if not cd_items.is_windows():
-        return
-    print(cd_items.WINDOWS_MESSAGE, file=sys.stderr)
-    try:
-        root = tk.Tk()
-        root.withdraw()
-        messagebox.showerror("Crimson Desert – Save Editor", cd_items.WINDOWS_MESSAGE)
-        root.destroy()
-    except tk.TclError:
-        pass
-    sys.exit(1)
-
-
 if __name__ == "__main__":
-    refuse_windows()
     App().mainloop()

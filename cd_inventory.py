@@ -384,14 +384,15 @@ def add_item(blob: bytearray, item_key: int, count: int, inventory_key: int | No
 
     # verification: decode again and find the item
     dec2 = Decoder(out)
-    inv2 = read_inventories(dec2)[inventory_key]
+    invs2 = read_inventories(dec2)
+    inv2 = invs2[inventory_key]
     last = inv2.items[-1]
     if (len(inv2.items) != len(inv.items) + 1
             or _u32(out, last.fields["_itemKey"][0]) != item_key
             or _u64(out, last.fields["_stackCount"][0]) != count):
         raise DecodeError("Post-insertion verification failed.")
     for k, other in invs.items():   # the other sub-inventories must be untouched
-        o2 = read_inventories(dec2)[k]
+        o2 = invs2[k]
         if k != inventory_key and len(o2.items) != len(other.items):
             raise DecodeError("Verification: another sub-inventory has changed.")
 

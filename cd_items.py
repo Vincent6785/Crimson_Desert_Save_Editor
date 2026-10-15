@@ -14,6 +14,10 @@ Usage:
 """
 from __future__ import annotations
 
+import linux_only
+
+linux_only.refuse_windows()  # before anything else (see linux_only.py)
+
 import argparse
 import hashlib
 import hmac
@@ -45,19 +49,6 @@ STEAM_ROOTS = (".local/share/Steam", ".steam/steam", ".var/app/com.valvesoftware
 
 
 MAX_STACK = 2**63 - 1    # _stackCount is a u64, kept within the signed range the game uses
-WINDOWS_MESSAGE = "Why are you using this shitty OS? I'm not built to handle hopeless situations."
-
-
-def is_windows() -> bool:
-    return sys.platform in ("win32", "cygwin") or os.name == "nt"
-
-
-def refuse_windows() -> None:
-    """This tool is Linux only: stop right away on Windows."""
-    if is_windows():
-        sys.exit(WINDOWS_MESSAGE)
-
-
 class SaveError(Exception):
     """Unreadable save, unexpected format or refused write."""
 
@@ -85,7 +76,12 @@ def save_roots() -> list[Path]:
 
 
 def find_saves() -> list[Path]:
-    return [p for root in save_roots() for p in root.glob("*/slot*/save.save")]
+    """Every save.save under the roots; a root may also be a Steam id folder or a slot folder."""
+    found = []
+    for root in save_roots():
+        for pattern in ("*/slot*/save.save", "slot*/save.save", "save.save"):
+            found += [p for p in root.glob(pattern) if p not in found]
+    return found
 
 
 def save_key(version: int) -> bytes:
@@ -101,15 +97,20 @@ def chacha20(data: bytes, nonce: bytes, key: bytes) -> bytes:
 
 def load_save(path: Path) -> tuple[bytes, bytearray]:
     data = path.read_bytes()
-    if data[:4] != b"SAVE":
+    if len(data) < HEADER_SIZE or data[:4] != b"SAVE":
         raise SaveError(f"{path}: missing SAVE signature")
     version = struct.unpack_from("<H", data, 4)[0]
+    if version not in _PREFIXES:
+        raise SaveError(f"{path}: unknown save version {version}")
     usize, csize = struct.unpack_from("<II", data, UNCOMP_SIZE_OFF)
     key = save_key(version)
     compressed = chacha20(data[HEADER_SIZE:HEADER_SIZE + csize], data[NONCE_OFF:NONCE_OFF + 16], key)
     if not hmac.compare_digest(hmac.new(key, compressed, hashlib.sha256).digest(), data[HMAC_OFF:HMAC_OFF + 32]):
         raise SaveError(f"{path}: invalid HMAC (unknown format or corrupted file)")
-    blob = lz4.block.decompress(compressed, uncompressed_size=usize)
+    try:
+        blob = lz4.block.decompress(compressed, uncompressed_size=usize)
+    except lz4.block.LZ4BlockError as e:
+        raise SaveError(f"{path}: cannot decompress ({e})") from e
     return data[:HEADER_SIZE], bytearray(blob)
 
 
@@ -323,7 +324,6 @@ def _backup_path(path: Path) -> Path:
 
 
 def main():
-    refuse_windows()
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("list", help="list items")
