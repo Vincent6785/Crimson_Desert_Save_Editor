@@ -109,10 +109,15 @@ A command-line interface is also available:
 
 ## Credits and license
 
-The save format (encryption, schema, structure), the item and knowledge name files and the maximum enchant levels
-come from the work of
-**NattKh**:
+This project would not exist without **NattKh** and their
 [CRIMSON-DESERT-SAVE-EDITOR-AND-GAME-MODS](https://github.com/NattKh/CRIMSON-DESERT-SAVE-EDITOR-AND-GAME-MODS)
-(MPL-2.0). The code in this repository is a pure-Python reimplementation based on their work.
+(MPL-2.0). The save format (encryption, schema, structure), the item and knowledge name files and the maximum enchant
+levels all come from their reverse-engineering work. The code in this repository is a pure-Python reimplementation
+based on it.
+
+If this editor is useful to you, please consider supporting NattKh:
+
+- Patreon: <https://www.patreon.com/cw/RicePaddyCheater>
+- Buy Me a Coffee: <https://buymeacoffee.com/sungoku>
 
 This project is distributed under the **Mozilla Public License 2.0** (see `LICENSE`).
