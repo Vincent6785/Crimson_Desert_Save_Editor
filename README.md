@@ -103,6 +103,7 @@ A command-line interface is also available:
 | `cd_skills.py` | Reading and changing skill points |
 | `cd_items_gui.py` | Graphical interface |
 | `linux_only.py` | Stops the tool on Windows, before any dependency is loaded |
+| `CREDITS.md` | Upstream credits, libraries and tools |
 | `tests/` | Checks that need no real save (`python -m unittest discover -s tests`) |
 | `items_db.json` | Item names, categories, max stacks, native inventories and max enchant levels |
 | `knowledge_names.json` | Skill / knowledge names |
@@ -119,5 +120,11 @@ If this editor is useful to you, please consider supporting NattKh:
 
 - Patreon: <https://www.patreon.com/cw/RicePaddyCheater>
 - Buy Me a Coffee: <https://buymeacoffee.com/sungoku>
+
+NattKh's project itself credits **gek**, **potter4208467**, **LukeFZ** and **fire** as core contributors. See
+[CREDITS.md](CREDITS.md) for the full list, the libraries used here (python-lz4, cryptography, sv-ttk) and the tools
+(Claude Code).
+
+Crimson Desert © Pearl Abyss. Unofficial, non-commercial tool, not affiliated with or endorsed by Pearl Abyss.
 
 This project is distributed under the **Mozilla Public License 2.0** (see `LICENSE`).
