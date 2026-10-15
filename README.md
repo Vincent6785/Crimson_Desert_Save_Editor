@@ -3,6 +3,8 @@
 A **native Linux** save editor for Crimson Desert (Steam / Proton), written in Python with a Tkinter GUI.
 No Windows DLL is needed, for reading or for writing.
 
+![Inventory tab (dark theme)](docs/screenshots/main_dark.png)
+
 ## Features
 
 - **Inventory**: change the quantity of any item (currency, camp resources, consumables…).
@@ -16,6 +18,16 @@ No Windows DLL is needed, for reading or for writing.
 - **Automatic backup** of the save before every write, in `~/crimson_save_backups/<date>/<slot>/`.
 
 Tested with game version **2.03.02**. Another version may change the format.
+
+## Screenshots
+
+| Add an item | Kliff's skill points |
+|---|---|
+| ![Add item dialog](docs/screenshots/add_dark.png) | ![Skills tab](docs/screenshots/skills_light.png) |
+
+Light theme, with pending changes highlighted before saving:
+
+![Inventory tab (light theme)](docs/screenshots/main_light.png)
 
 ## Installation
 
