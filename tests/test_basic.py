@@ -85,6 +85,13 @@ class FilesTest(unittest.TestCase):
         self.assertGreater(len(addable), 5000)
         self.assertTrue(all(not cd_inventory.blocked(db[k]) for k in addable))
 
+    def test_max_enchant(self):
+        db = cd_inventory.load_items_db()
+        levels = [v["maxEnchant"] for v in db.values() if "maxEnchant" in v]
+        self.assertGreater(len(levels), 3000)
+        self.assertTrue(all(0 <= m <= 20 for m in levels))
+        self.assertGreater(sum(1 for m in levels if m > 0), 500)
+
     def test_knowledge_names(self):
         self.assertGreater(len(cd_skills.load_knowledge_names()), 1000)
 

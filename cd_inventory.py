@@ -439,3 +439,74 @@ def remove_item(blob: bytearray, element_start: int) -> tuple[bytearray, dict]:
             raise DecodeError("Post-removal verification failed.")
     item_key = _u32(blob, el.fields["_itemKey"][0]) if "_itemKey" in el.fields else None
     return out, {"inventory": inv_key, "itemKey": item_key, "shrink": shrink}
+
+
+# ---------------------------------------------------------------- enchantment / durability
+
+FULL_ENDURANCE = 0xFFFF   # what the game writes for an undamaged item
+
+
+def item_props(blob: bytes, el: Element) -> dict:
+    """Enchant level (absent field = 0) and durability of an ItemSaveData element."""
+    def get(name):
+        if name not in el.fields:
+            return None
+        off, size = el.fields[name]
+        return int.from_bytes(blob[off:off + size], "little")
+    return {"enchant": get("_enchantLevel") or 0, "endurance": get("_endurance")}
+
+
+def max_enchant(item_key: int, db: dict) -> int:
+    """Highest enchant level of the item (0 = not enchantable or unknown)."""
+    return db.get(item_key, {}).get("maxEnchant") or 0
+
+
+def set_item_field(blob: bytearray, element_start: int, name: str, value: int) -> bytearray:
+    """Set a fixed u16 field (_enchantLevel, _endurance) of an inventory item.
+
+    Written in place when present; otherwise the mask bit is set and the field inserted at its
+    schema position. Raise DecodeError / ValueError on failure."""
+    if name not in ("_enchantLevel", "_endurance") or not 0 <= value <= 0xFFFF:
+        raise ValueError(f"Invalid change: {name} = {value}.")
+    dec = Decoder(blob)
+    invs = read_inventories(dec)
+    found = [(inv, el) for inv in invs.values() for el in inv.items if el.start == element_start]
+    if not found:
+        raise ValueError("Item not found in the inventory.")
+    inv, el = found[0]
+    snapshot = _snapshot(blob, invs)
+
+    if name in el.fields:
+        out = bytearray(blob)
+        struct.pack_into("<H", out, el.fields[name][0], value)
+    else:
+        fields = dec.types[dec.names.index("ItemSaveData")][1]
+        idx = next(i for i, f in enumerate(fields) if f[0] == name)
+        prev = [i for i in range(idx) if fields[i][0] in el.fields]
+        if not prev or any(fields[i][2] not in (0, 2) for i in range(prev[-1] + 1, idx)):
+            raise DecodeError(f"{name}: insertion position unknown.")
+        mbc = _u16(blob, el.start)
+        if idx // 8 >= mbc:
+            raise DecodeError(f"{name}: mask too short to add the field.")
+        off, size = el.fields[fields[prev[-1]][0]]
+        out = bytearray(blob)
+        out[el.start + 2 + idx // 8] |= 1 << (idx % 8)
+        out = _splice(out, dec, off + size, insert=struct.pack("<H", value),
+                      trailing=(el.end - 4, inv.element.end - 4))
+
+    # verification: same items everywhere, only this field of this item changed
+    invs2 = read_inventories(Decoder(out))
+    after = _snapshot(out, invs2)
+    target = next(e for e in invs2[inv.key].items
+                  if _u64(out, e.fields["_itemNo"][0]) == _u64(blob, el.fields["_itemNo"][0]))
+    if after != snapshot or struct.unpack_from("<H", out, target.fields[name][0])[0] != value:
+        raise DecodeError("Verification after the change failed.")
+    return out
+
+
+def _snapshot(blob: bytes, invs: dict) -> dict:
+    """(itemNo, itemKey, slot, stack) of every item, per sub-inventory."""
+    def vals(el):
+        return tuple(int.from_bytes(blob[o:o + s], "little") for o, s in
+                     (el.fields.get(n, (0, 0)) for n in ("_itemNo", "_itemKey", "_slotNo", "_stackCount")))
+    return {k: [vals(el) for el in inv.items] for k, inv in invs.items()}

@@ -14,6 +14,8 @@ No Windows DLL is needed, for reading or for writing. **Linux only**: Windows is
 - **Add an item** that is not in the inventory, picked from a list of about 5,800 items. The editor checks that
   there is free space, and adds the item to the camp resources if it belongs there, otherwise to the character bag.
   Items that belong to other inventories are not offered.
+- **Enchant level** of equipment, from +0 up to the item's own maximum (+10 for most weapons and armor).
+- **Repair** damaged items (durability back to full).
 - **Delete an item** from the inventory (except the last item of a sub-inventory, which the save format does not
   allow to empty).
 - **Kliff's skill points**: set the number of available points (up to 999 in the interface). You then spend them in
@@ -102,12 +104,13 @@ A command-line interface is also available:
 | `cd_items_gui.py` | Graphical interface |
 | `linux_only.py` | Stops the tool on Windows, before any dependency is loaded |
 | `tests/` | Checks that need no real save (`python -m unittest discover -s tests`) |
-| `items_db.json` | Item names, categories, max stacks and native inventories |
+| `items_db.json` | Item names, categories, max stacks, native inventories and max enchant levels |
 | `knowledge_names.json` | Skill / knowledge names |
 
 ## Credits and license
 
-The save format (encryption, schema, structure) and the item and knowledge name files come from the work of
+The save format (encryption, schema, structure), the item and knowledge name files and the maximum enchant levels
+come from the work of
 **NattKh**:
 [CRIMSON-DESERT-SAVE-EDITOR-AND-GAME-MODS](https://github.com/NattKh/CRIMSON-DESERT-SAVE-EDITOR-AND-GAME-MODS)
 (MPL-2.0). The code in this repository is a pure-Python reimplementation based on their work.

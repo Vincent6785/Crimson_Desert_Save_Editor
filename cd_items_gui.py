@@ -173,6 +173,8 @@ class App(tk.Tk):
         self.knames = cd_skills.load_knowledge_names()
         self.skills = None                # SkillState of the working blob
         self.skills_orig = None           # SkillState on disk
+        self.props: dict[int, dict] = {}       # itemNo -> {"enchant", "endurance"} in the working blob
+        self.props_orig: dict[int, dict] = {}  # same, on disk
 
         self._build()
         self._bind_shortcuts()
@@ -347,7 +349,7 @@ class App(tk.Tk):
 
         ttk.Separator(self.sidebar).pack(fill="x", pady=12)
         ttk.Label(self.sidebar, text="LEGEND", style="Muted.TLabel").pack(anchor="w", pady=(0, 6))
-        for tag, text in (("modified", "quantity changed"), ("added", "item added")):
+        for tag, text in (("modified", "changed"), ("added", "item added")):
             row = ttk.Frame(self.sidebar)
             row.pack(fill="x", pady=1)
             tk.Label(row, width=2, background=self.c(tag)).pack(side="left", padx=(0, 6))
@@ -388,6 +390,26 @@ class App(tk.Tk):
         self.force_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(self.d_qty_frame, text="Ignore max stack", variable=self.force_var).pack(
             anchor="w", pady=(8, 0))
+
+        eq = ttk.LabelFrame(d, text=" Enchantment & durability ", padding=px(10))
+        eq.pack(fill="x", pady=(px(10), 0))
+        erow = ttk.Frame(eq)
+        erow.pack(fill="x")
+        ttk.Label(erow, text="Enchant  +").pack(side="left")
+        self.ench_var = tk.StringVar()
+        self.ench_box = ttk.Spinbox(erow, from_=0, to=10, textvariable=self.ench_var, width=5, justify="right")
+        self.ench_box.pack(side="left")
+        self.ench_box.bind("<Return>", lambda e: self._set_enchant())
+        self.ench_btn = ttk.Button(erow, text="Set", width=5, command=self._set_enchant)
+        self.ench_btn.pack(side="left", padx=(6, 0))
+        self.ench_info = ttk.Label(eq, text="", style="Muted.TLabel", wraplength=px(260), justify="left")
+        self.ench_info.pack(anchor="w", pady=(4, 6))
+        drow = ttk.Frame(eq)
+        drow.pack(fill="x")
+        self.dur_info = ttk.Label(drow, text="", style="Muted.TLabel")
+        self.dur_info.pack(side="left")
+        self.repair_btn = ttk.Button(drow, text="Repair", command=self._repair)
+        self.repair_btn.pack(side="right")
 
         ttk.Button(d, text="Remove from inventory  (Del)", command=self._remove).pack(fill="x", pady=(16, 0))
         ttk.Label(d, text="+/- : quantity · Del : delete\nCtrl+N : add · Ctrl+S : save",
@@ -555,7 +577,12 @@ class App(tk.Tk):
             self.status["text"] = "No save found (set the folder with the CD_SAVE_DIR variable)"
 
     def dirty(self) -> bool:
-        return bool(self.added or self.removed or self.changed() or self.skills_changed())
+        return bool(self.added or self.removed or self.changed() or self.skills_changed() or self.props_changed())
+
+    def props_changed(self) -> set:
+        """Original items whose enchant level or durability differs from the one on disk."""
+        return {no for no, pr in self.props.items()
+                if no in self.props_orig and no not in self.added and pr != self.props_orig[no]}
 
     def changed(self) -> list[dict]:
         """Original items whose quantity differs from the one on disk."""
@@ -583,6 +610,7 @@ class App(tk.Tk):
         self.removed.clear()
         self.orig = {i["itemNo"]: i["stack"] for i in decoded[0] if i["container"] == "InventorySaveData"}
         self.skills_orig = decoded[2]
+        self.props_orig = self._props_of(blob, decoded[1])
         self._set_blob(blob, decoded)
 
     def _show_current_slot(self):
@@ -603,6 +631,11 @@ class App(tk.Tk):
             skills = None
         return items, invs, skills
 
+    @staticmethod
+    def _props_of(blob: bytearray, invs: dict) -> dict[int, dict]:
+        return {struct.unpack_from("<Q", blob, el.fields["_itemNo"][0])[0]: cd_inventory.item_props(blob, el)
+                for inv in invs.values() for el in inv.items if "_itemNo" in el.fields}
+
     def _set_blob(self, blob: bytearray, decoded=None):
         """Installs a new working blob and recomputes the item list."""
         if decoded is None:
@@ -616,6 +649,7 @@ class App(tk.Tk):
         self.pending.clear()
         self.items = {i["id"]: i for i in items if i["container"] == "InventorySaveData"}
         self.inv_of = {el.start: k for k, inv in self.invs.items() for el in inv.items}
+        self.props = self._props_of(blob, self.invs)
         if self.inv_filter.get() != "all" and int(self.inv_filter.get()) not in self.invs:
             self.inv_filter.set("all")
         self._build_sidebar()
@@ -645,7 +679,11 @@ class App(tk.Tk):
         qty = f"{fmt(before)} → {fmt(cur)}" if cur != before else fmt(cur)
         m = info.get("maxStack")
         inv = self.inv_of.get(it["header"])
-        return (info.get("name", f"Unknown item ({it['key']})"), self.db.get(it["key"], {}).get("category") or "–",
+        name = info.get("name", f"Unknown item ({it['key']})")
+        ench = self.props.get(it["itemNo"], {}).get("enchant")
+        if ench:
+            name += f"  +{ench}"
+        return (name, self.db.get(it["key"], {}).get("category") or "–",
                 inventory_label(inv) if inv is not None else "?", it["slot"], qty,
                 "∞" if m and m >= INFINITE else (fmt(m) if m else "?"))
 
@@ -653,6 +691,8 @@ class App(tk.Tk):
         if it["itemNo"] in self.added:
             return ("added",)
         if it["itemNo"] in self.orig and self._qty(it["id"]) != self.orig[it["itemNo"]]:
+            return ("modified",)
+        if it["itemNo"] in self.props_changed():
             return ("modified",)
         return ("stripe",) if index % 2 else ()
 
@@ -705,6 +745,7 @@ class App(tk.Tk):
             self.d_meta["text"] = "Select one or more rows in the table."
             self.qty_var.set("")
             self.d_qty_info["text"] = ""
+            self._show_equipment([])
         elif len(sel) == 1:
             it = sel[0]
             info = self.db.get(it["key"], {})
@@ -718,11 +759,13 @@ class App(tk.Tk):
             before = self._before(it)
             extra = f"  ·  on disk: {fmt(before)}" if before != self._qty(it["id"]) else ""
             self.d_qty_info["text"] = f"Max stack: {mx}{extra}"
+            self._show_equipment([it])
         else:
             self.d_name["text"] = f"{len(sel)} items selected"
             self.d_meta["text"] = "Buttons apply to the whole selection."
             self.qty_var.set("")
             self.d_qty_info["text"] = ""
+            self._show_equipment(sel)
 
     # ------------------------------------------------------------ quantity editing
 
@@ -768,6 +811,81 @@ class App(tk.Tk):
         for it in self._selected():
             self._apply(it, self._before(it))
         self._after_edit()
+
+    # ------------------------------------------------------------ enchantment / durability
+
+    def _ench_cap(self, it) -> int:
+        """Highest level offered: the item's max, never below its current level."""
+        cur = self.props.get(it["itemNo"], {}).get("enchant", 0)
+        m = cd_inventory.max_enchant(it["key"], self.db)
+        return max(m, cur) if m else 0
+
+    def _show_equipment(self, sel: list[dict]):
+        enchantable = [it for it in sel if self._ench_cap(it)]
+        damaged = [it for it in sel if self.props.get(it["itemNo"], {}).get("endurance")
+                   not in (None, cd_inventory.FULL_ENDURANCE)]
+        state = ["!disabled"] if enchantable else ["disabled"]
+        self.ench_box.state(state)
+        self.ench_btn.state(state)
+        if len(sel) == 1 and enchantable:
+            it = sel[0]
+            self.ench_box["to"] = self._ench_cap(it)
+            self.ench_var.set(str(self.props[it["itemNo"]]["enchant"]))
+            before = self.props_orig.get(it["itemNo"], {}).get("enchant")
+            extra = f"  ·  on disk: +{before}" if before is not None and before != self.props[it["itemNo"]]["enchant"] else ""
+            self.ench_info["text"] = f"Max level: +{cd_inventory.max_enchant(it['key'], self.db)}{extra}"
+        elif enchantable:
+            self.ench_box["to"] = max(self._ench_cap(it) for it in enchantable)
+            self.ench_info["text"] = f"{len(enchantable)} enchantable item(s), each capped at its own max."
+        else:
+            self.ench_var.set("")
+            self.ench_info["text"] = "Not enchantable." if sel else ""
+        if len(sel) == 1:
+            dur = self.props.get(sel[0]["itemNo"], {}).get("endurance")
+            self.dur_info["text"] = ("Durability: –" if dur is None else "Durability: full"
+                                     if dur == cd_inventory.FULL_ENDURANCE else f"Durability: {fmt(dur)} (damaged)")
+        else:
+            self.dur_info["text"] = f"Damaged: {len(damaged)}" if sel else ""
+        self.repair_btn.state(["!disabled"] if damaged else ["disabled"])
+
+    def _edit_items(self, sel: list[dict], change) -> None:
+        """Applies change(it) -> (field, value) | None to each item, one blob rewrite at a time."""
+        blob = self._blob_with_pending()
+        done = 0
+        for it in sel:
+            todo = change(it)
+            if todo is None:
+                continue
+            try:
+                invs = cd_inventory.read_inventories(cd_inventory.Decoder(blob))
+                start = next(el.start for inv in invs.values() for el in inv.items
+                             if "_itemNo" in el.fields
+                             and struct.unpack_from("<Q", blob, el.fields["_itemNo"][0])[0] == it["itemNo"])
+                blob = cd_inventory.set_item_field(blob, start, *todo)
+            except Exception as e:
+                name = self.names.get(it["key"], {}).get("name", str(it["key"]))
+                messagebox.showerror("Cannot change item", f"{name}: {e or type(e).__name__}")
+                break
+            done += 1
+        if done:
+            self._set_blob(blob)
+
+    def _set_enchant(self):
+        try:
+            level = int(self.ench_var.get())
+        except ValueError:
+            return
+        def change(it):
+            cap = self._ench_cap(it)
+            v = max(0, min(level, cap))
+            return ("_enchantLevel", v) if cap and v != self.props[it["itemNo"]]["enchant"] else None
+        self._edit_items(self._selected(), change)
+
+    def _repair(self):
+        def change(it):
+            dur = self.props.get(it["itemNo"], {}).get("endurance")
+            return None if dur in (None, cd_inventory.FULL_ENDURANCE) else ("_endurance", cd_inventory.FULL_ENDURANCE)
+        self._edit_items(self._selected(), change)
 
     def _blob_with_pending(self) -> bytearray:
         blob = bytearray(self.blob)
@@ -879,6 +997,8 @@ class App(tk.Tk):
         n = len(self.changed())
         if n:
             changes.append(f"{n} quantity change(s)")
+        if self.props_changed():
+            changes.append(f"{len(self.props_changed())} enchant/durability change(s)")
         if self.skills_changed():
             changes.append(f"skill points {self.skills_orig.current} → {self.skills.current}")
         if changes:
@@ -907,7 +1027,8 @@ class App(tk.Tk):
             messagebox.showerror("Write failed", str(e))
             return
         summary = (f"{len(self.added)} item(s) added, {len(self.removed)} deleted, "
-                   f"{len(self.changed())} quantity change(s).")
+                   f"{len(self.changed())} quantity change(s), "
+                   f"{len(self.props_changed())} enchant/durability change(s).")
         if self.skills_changed():
             summary += (f"\nKliff's skill points: {self.skills_orig.current} → "
                         f"{self.skills.current} available.")
